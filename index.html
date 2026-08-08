@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#ffffff">
+<title>桌面备忘录</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f0f0f0; color: #222; max-width: 480px; margin: 0 auto;
+  min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column;
+  -webkit-tap-highlight-color: transparent;
+}
+/* ── header ── */
+header {
+  background: #fff; padding: 12px 16px; display: flex; align-items: center;
+  justify-content: space-between; border-bottom: 1px solid #e0e0e0;
+  position: sticky; top: 0; z-index: 10;
+}
+header h1 { font-size: 18px; font-weight: 700; }
+header button {
+  background: none; border: 1px solid #ccc; border-radius: 6px;
+  padding: 6px 12px; font-size: 13px; cursor: pointer;
+}
+/* ── list ── */
+main { flex: 1; overflow-y: auto; padding: 8px 12px 140px; }
+.empty { text-align: center; color: #999; padding: 60px 0; font-size: 15px; }
+.memo-card {
+  background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.06);
+}
+.memo-card.done .memo-text { text-decoration: line-through; color: #aaa; }
+.memo-check { width: 22px; height: 22px; accent-color: #4CAF50; flex-shrink: 0; }
+.memo-body { flex: 1; min-width: 0; }
+.memo-text { font-size: 15px; word-break: break-all; }
+.memo-badge { font-size: 11px; color: #1976D2; margin-top: 3px; }
+.memo-del {
+  background: none; border: none; color: #ccc; font-size: 18px;
+  cursor: pointer; padding: 4px 8px; flex-shrink: 0;
+}
+/* ── add panel ── */
+footer {
+  position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 100%; max-width: 480px; background: #fff; border-top: 1px solid #e0e0e0;
+  padding: 12px 16px 16px; box-shadow: 0 -2px 8px rgba(0,0,0,.06); z-index: 10;
+}
+footer input[type=text] {
+  width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px;
+  font-size: 15px; margin-bottom: 8px; outline: none;
+}
+footer input[type=text]:focus { border-color: #1976D2; }
+.reminder-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; }
+.reminder-row label { margin-right: 4px; white-space: nowrap; }
+.reminder-row input[type=radio] { accent-color: #1976D2; }
+.reminder-row select, .reminder-row input[type=number] {
+  padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;
+}
+.spinbox-sm { width: 44px; text-align: center; }
+.btn-row { display: flex; gap: 8px; margin-top: 8px; }
+.btn-primary {
+  flex: 1; padding: 12px; background: #1976D2; color: #fff;
+  border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer;
+}
+.hide-row { padding: 4px 12px; font-size: 12px; color: #666; display: flex; align-items: center; gap: 6px; }
+.hide-row input { accent-color: #1976D2; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>桌面备忘录</h1>
+  <button id="hideDoneBtn" onclick="toggleHideDone()">隐藏已完成</button>
+</header>
+
+<main id="memoList"></main>
+
+<footer>
+  <input type="text" id="contentInput" placeholder="输入备忘内容..." autocomplete="off">
+  <div class="reminder-row">
+    <label><input type="radio" name="rtype" value="none" checked onchange="onTypeChange()"> 无</label>
+    <label><input type="radio" name="rtype" value="specific" onchange="onTypeChange()"> 指定</label>
+    <span id="specificBox" style="display:none">
+      <input type="date" id="rdate" class="spinbox-sm">
+      <input type="time" id="rtime" class="spinbox-sm">
+    </span>
+    <label><input type="radio" name="rtype" value="countdown" onchange="onTypeChange()"> 倒计时</label>
+    <span id="countdownBox" style="display:none">
+      <input type="number" id="cdMin" value="30" min="1" max="1440" class="spinbox-sm"> 分
+    </span>
+  </div>
+  <div class="reminder-row" id="repeatRow" style="display:none; margin-top:4px">
+    重复: <input type="number" id="rpHour" value="0" min="0" max="99" class="spinbox-sm"> 时
+    <input type="number" id="rpMin" value="30" min="0" max="59" class="spinbox-sm"> 分 &nbsp;
+    共 <input type="number" id="rpCount" value="0" min="0" max="999" class="spinbox-sm"> 次 (0不限)
+  </div>
+  <div class="btn-row">
+    <button class="btn-primary" onclick="addMemo()">添加备忘</button>
+  </div>
+</footer>
+
+<script>
+// ── Data ──
+let memos = [];
+let hideDone = false;
+
+function load() {
+  try { memos = JSON.parse(localStorage.getItem('desktopMemos') || '[]'); } catch(e) { memos = []; }
+  hideDone = localStorage.getItem('desktopMemoHideDone') === '1';
+  document.getElementById('hideDoneBtn').textContent = hideDone ? '显示已完成' : '隐藏已完成';
+}
+function save() { localStorage.setItem('desktopMemos', JSON.stringify(memos)); }
+
+// ── Render ──
+function render() {
+  const list = document.getElementById('memoList');
+  let active = memos.filter(m => !m.done).sort((a,b) => b.created - a.created);
+  let done = memos.filter(m => m.done).sort((a,b) => b.created - a.created);
+  let items = active.concat(hideDone ? [] : done);
+
+  if (!items.length) { list.innerHTML = '<div class="empty">暂无备忘</div>'; return; }
+  list.innerHTML = items.map(m => {
+    let badge = reminderBadge(m);
+    return `<div class="memo-card${m.done?' done':''}">
+      <input type="checkbox" class="memo-check" ${m.done?'checked':''} onchange="toggleDone('${m.id}')">
+      <div class="memo-body">
+        <div class="memo-text" ondblclick="editMemo('${m.id}')">${esc(m.content)}</div>
+        ${badge ? `<div class="memo-badge">${badge}</div>` : ''}
+      </div>
+      <button class="memo-del" onclick="deleteMemo('${m.id}')" title="删除">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function reminderBadge(m) {
+  if (m.done) return '';
+  let repeat = '';
+  if (m.repeatInterval) {
+    let t = m.repeatCount || 0;
+    let r = m.repeatRemaining != null ? m.repeatRemaining : t;
+    repeat = t > 0 ? ` ↻${r}/${t}` : ' ↻∞';
+  }
+  if (m.triggered) return '[已提醒]';
+  if (m.rtype === 'specific' && m.reminderTime) {
+    let d = new Date(m.reminderTime);
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}${repeat}`;
+  }
+  if (m.rtype === 'countdown' && m.countdownEnd) {
+    let secs = (new Date(m.countdownEnd) - Date.now()) / 1000;
+    if (secs > 0) {
+      let mins = Math.floor(secs / 60);
+      return mins > 0 ? `还有${mins}分钟${repeat}` : '马上' + repeat;
+    }
+    return '[已到期]';
+  }
+  return '';
+}
+
+// ── Actions ──
+function addMemo() {
+  let content = document.getElementById('contentInput').value.trim();
+  if (!content) return;
+  let rtype = document.querySelector('input[name="rtype"]:checked').value;
+  let memo = {
+    id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+    content, rtype: rtype === 'none' ? null : rtype,
+    created: Date.now(), done: false, triggered: false,
+    reminderTime: null, countdownEnd: null,
+    repeatInterval: null, repeatCount: 0, repeatRemaining: 0
+  };
+  if (rtype === 'specific') {
+    let d = document.getElementById('rdate').value;
+    let t = document.getElementById('rtime').value;
+    if (d && t) memo.reminderTime = new Date(d + 'T' + t).toISOString();
+  } else if (rtype === 'countdown') {
+    let mins = parseInt(document.getElementById('cdMin').value) || 30;
+    memo.countdownEnd = new Date(Date.now() + mins * 60000).toISOString();
+  }
+  if (rtype !== 'none') {
+    let h = parseInt(document.getElementById('rpHour').value) || 0;
+    let m = parseInt(document.getElementById('rpMin').value) || 0;
+    if (h > 0 || m > 0) memo.repeatInterval = h * 60 + m;
+    memo.repeatCount = parseInt(document.getElementById('rpCount').value) || 0;
+    memo.repeatRemaining = memo.repeatCount;
+  }
+  memos.push(memo); save(); render();
+  document.getElementById('contentInput').value = '';
+  document.querySelector('input[value="none"]').checked = true;
+  onTypeChange();
+}
+
+function toggleDone(id) {
+  let m = memos.find(x => x.id === id); if (m) { m.done = !m.done; save(); render(); }
+}
+function deleteMemo(id) {
+  if (!confirm('确定删除这条备忘？')) return;
+  memos = memos.filter(x => x.id !== id); save(); render();
+}
+function editMemo(id) {
+  let m = memos.find(x => x.id === id); if (!m || m.done) return;
+  let txt = prompt('编辑备忘', m.content);
+  if (txt !== null && txt.trim()) { m.content = txt.trim(); save(); render(); }
+}
+function toggleHideDone() {
+  hideDone = !hideDone;
+  localStorage.setItem('desktopMemoHideDone', hideDone ? '1' : '0');
+  document.getElementById('hideDoneBtn').textContent = hideDone ? '显示已完成' : '隐藏已完成';
+  render();
+}
+function onTypeChange() {
+  let v = document.querySelector('input[name="rtype"]:checked').value;
+  document.getElementById('specificBox').style.display = v === 'specific' ? '' : 'none';
+  document.getElementById('countdownBox').style.display = v === 'countdown' ? '' : 'none';
+  document.getElementById('repeatRow').style.display = v !== 'none' ? '' : 'none';
+  if (v === 'specific') {
+    let now = new Date();
+    document.getElementById('rdate').value = now.toISOString().slice(0,10);
+    document.getElementById('rtime').value = now.toTimeString().slice(0,5);
+  }
+}
+
+// ── Reminder Check ──
+function checkReminders() {
+  let now = Date.now();
+  let changed = false;
+  for (let m of memos) {
+    if (m.triggered || m.done) continue;
+    let hit = false;
+    if (m.rtype === 'specific' && m.reminderTime && now >= new Date(m.reminderTime).getTime()) hit = true;
+    if (m.rtype === 'countdown' && m.countdownEnd && now >= new Date(m.countdownEnd).getTime()) hit = true;
+    if (!hit) continue;
+    m.triggered = true;
+    showNotification(m);
+    let interval = m.repeatInterval;
+    if (interval) {
+      let total = m.repeatCount, remaining = m.repeatRemaining;
+      if (total > 0) { remaining--; m.repeatRemaining = remaining; }
+      if (total === 0 || remaining > 0) {
+        if (m.rtype === 'specific') m.reminderTime = new Date(now + interval * 60000).toISOString();
+        if (m.rtype === 'countdown') m.countdownEnd = new Date(now + interval * 60000).toISOString();
+        m.triggered = false;
+      }
+    }
+    changed = true;
+  }
+  if (changed) { save(); render(); }
+}
+
+function showNotification(memo) {
+  if (Notification.permission === 'granted') {
+    let tag = memo.repeatInterval ? (memo.repeatCount ? `重复${memo.repeatRemaining}/${memo.repeatCount}次` : '重复提醒') : '';
+    new Notification('备忘提醒', { body: memo.content + (tag ? '\n' + tag : ''), icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y="80" font-size="80">📝</text></svg>', requireInteraction: true });
+  }
+}
+
+function requestNotif() {
+  if (Notification.permission === 'default') Notification.requestPermission();
+}
+
+// ── Init ──
+load(); render();
+onTypeChange();
+setInterval(checkReminders, 15000);
+document.addEventListener('click', requestNotif, { once: true });
+</script>
+</body>
+</html>
